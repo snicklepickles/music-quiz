@@ -1,11 +1,10 @@
 # bot.py
 import os
 import discord
-import youtube_dl
-import asyncio
 from discord import app_commands
 from dotenv import load_dotenv
-from thefuzz import fuzz, process
+from thefuzz import fuzz
+from src.music_quiz import MusicQuiz
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -39,12 +38,6 @@ async def ping(interaction):
     await interaction.response.send_message("Pong!")
 
 
-voice_clients = {}
-ytdl_options = {'format': 'bestaudio/best'}
-ytdl = youtube_dl.YoutubeDL(ytdl_options)
-ffmpeg_options = {'options': '-vn'}
-
-
 # !TODO - Add a random queue system
 # !TODO - Add a (vote to) skip command
 # !TODO - Default to a popular songs playlist if no URL is specified
@@ -54,26 +47,16 @@ ffmpeg_options = {'options': '-vn'}
 @app_commands.describe(url='Playlist URL')
 async def play(interaction, url: str = None):
     channel = interaction.user.voice.channel
-    voice_client = voice_clients.get(channel.guild.id)
-    if voice_client is not None and voice_client.is_playing():
+    voice_client = interaction.guild.voice_client
+    if voice_client and voice_client.is_playing():
         await interaction.response.send_message("Quiz is already running")
     elif channel is None:
         await interaction.response.send_message("Please join a voice channel first")
     else:
-        voice_client = await channel.connect()
-        voice_clients[voice_client.guild.id] = voice_client
-
-        loop = asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
-
-        # print(data['title'])
-        song = data['url']
-        player = discord.FFmpegPCMAudio(song, **ffmpeg_options, executable="C:\\ffmpeg\\ffmpeg.exe")
-
-        voice_client.play(player)
-
-        # url = url.replace("https://open.spotify.com/playlist/", "https://open.spotify.com/embed/playlist/")
-        # await interaction.response.send_message("Quiz started")
+        music_quiz = MusicQuiz(interaction, url)
+        embed = discord.Embed(title="Music Quiz", description="Loading songs... get ready!")
+        await interaction.response.send_message(embed=embed)
+        await music_quiz.start()
 
 
 @tree.command(name="pause", description="Pauses a round of music quiz")
@@ -98,13 +81,13 @@ async def resume(interaction):
 
 @tree.command(name="stop", description="Stops a round of music quiz")
 async def stop(interaction):
-    try:
-        voice_client = voice_clients[interaction.guild.id]
+    voice_client = interaction.guild.voice_client
+    if voice_client is None:
+        await interaction.response.send_message("Quiz is not running")
+    else:
         voice_client.stop()
         await voice_client.disconnect()
         await interaction.response.send_message("Quiz stopped")
-    except KeyError:
-        await interaction.response.send_message("Quiz is not running")
 
 
 client.run(TOKEN)
